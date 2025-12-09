@@ -28,59 +28,61 @@ class OAuthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"<h1>Authorization received! You can close this tab.</h1>")
 
-server = HTTPServer(("127.0.0.1", 8080), OAuthHandler)
+def main():
 
-# ---------- Retrieving environment info from json ----------
-config = load_info()
+    # ---------- Retrieving environment info from json ----------
+    config = load_info()
 
-client_id = config['client_id']
-redirect_uri = config['redirect_uri']
-client_secret = config['client_secret']
+    client_id = config['client_id']
+    redirect_uri = config['redirect_uri']
+    client_secret = config['client_secret']
 
-# ---------- Build Spotify auth URL ----------
-scopes = "user-library-read user-top-read playlist-read-private"
+    # ---------- Build Spotify auth URL ----------
+    scopes = "user-library-read user-top-read playlist-read-private"
 
-auth_url = (
-    f"https://accounts.spotify.com/authorize?client_id={client_id}"
-    f"&response_type=code&redirect_uri={redirect_uri}&scope={scopes}"
-)
+    auth_url = (
+        f"https://accounts.spotify.com/authorize?client_id={client_id}"
+        f"&response_type=code&redirect_uri={redirect_uri}&scope={scopes}"
+    )
 
-# ---------- Open browser automatically ----------
-webbrowser.open(auth_url)
+    # ---------- Open browser automatically ----------
+    server = HTTPServer(("127.0.0.1", 8080), OAuthHandler)
+    webbrowser.open(auth_url)
 
-# ---------- Wait for code ----------
-print("Waiting for authorization...")
-server.handle_request()
-code = getattr(server, 'auth_code', None)
-print("Received code:", code)
+    # ---------- Wait for code ----------
+    print("Waiting for authorization...")
+    server.handle_request()
+    code = getattr(server, 'auth_code', None)
+    print("Received code:", code)
 
-# ---------- Exchange code for access + refresh tokens ----------
+    # ---------- Exchange code for access + refresh tokens ----------
+    auth_str = f"{client_id}:{client_secret}"
+    b64_auth_str = b64encode(auth_str.encode()).decode()
 
-auth_str = f"{client_id}:{client_secret}"
-b64_auth_str = b64encode(auth_str.encode()).decode()
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri
+    }
 
-data = {
-    "grant_type": "authorization_code",
-    "code": code,
-    "redirect_uri": redirect_uri
-}
+    headers = {
+        "Authorization": f"Basic {b64_auth_str}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
 
-headers = {
-    "Authorization": f"Basic {b64_auth_str}",
-    "Content-Type": "application/x-www-form-urlencoded"
-}
+    resp = requests.post("https://accounts.spotify.com/api/token", headers=headers, data=data)
+    tokens = resp.json()
+    access_token = tokens["access_token"]
+    refresh_token = tokens["refresh_token"]
 
-resp = requests.post("https://accounts.spotify.com/api/token", headers=headers, data=data)
-tokens = resp.json()
-access_token = tokens["access_token"]
-refresh_token = tokens["refresh_token"]
+    # ---------- Write access and refresh tokens to json ----------
+    token_data = {
+        'access_token': access_token,
+        'refresh_token': refresh_token
+    }
 
-# ---------- Write access and refresh tokens to json ----------
+    with open('tokens.json', 'w') as f:
+        json.dump(token_data, f, indent=4)
 
-token_data = {
-    'access_token': access_token,
-    'refresh_token': refresh_token
-}
-
-with open('tokens.json', 'w') as f:
-    json.dump(token_data, f, indent=4)
+if __name__ == '__main__':
+    main()
