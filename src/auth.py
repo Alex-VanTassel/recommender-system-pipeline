@@ -77,8 +77,10 @@ refresh_token = tokens["refresh_token"]
 
 # ---------- Write access and refresh tokens to json ----------
 
-config['access_token'] = access_token
-config['refresh_token'] = refresh_token
+token_data = {
+    'access_token': access_token,
+    'refresh_token': refresh_token
+}
 
-with open('info.json', 'w') as f:
-    json.dump(config, f, indent=4)
+with open('tokens.json', 'w') as f:
+    json.dump(token_data, f, indent=4)
