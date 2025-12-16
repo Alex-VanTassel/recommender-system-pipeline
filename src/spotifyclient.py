@@ -17,11 +17,15 @@ class SpotifyClient:
         self._load_tokens()
 
     def _load_tokens(self):
+        '''
+        Loads initial tokens from the json file created by running auth.py
+        '''
         try:
             with open(self.tokens_file, 'r') as f:
                 tokens = json.load(f)
                 self.access_token = tokens['access_token']
                 self.refresh_token = tokens['refresh_token']
+
                 if "expires_at" in tokens:
                     # New format
                     self.expires_at = tokens["expires_at"]
@@ -37,6 +41,9 @@ class SpotifyClient:
             raise RuntimeError(f"Malformed token file, missing field: {e}")
         
     def save_tokens(self):
+        '''
+        Writes current access/refresh tokens to json file for secure storage
+        '''
         
         data = {
             "access_token": self.access_token,
@@ -93,15 +100,56 @@ class SpotifyClient:
         self.save_tokens()
         print("Refresh successful")
 
+    def is_token_expired(self, buffer=10):
+        return self.expires_at < time.time() + buffer
 
-    def request(self):
-        pass
+
+    def request(self, method, endpoint, params=None, data=None, json_data=None):
+        """
+        Make a request to the Spotify API, handling token refresh automatically.
+
+        Args:
+            method: 'GET', 'POST', etc.
+            endpoint: Spotify API endpoint, e.g., '/v1/me/top/tracks'
+            params: dict of query parameters
+            data: dict for form-encoded body
+            json_data: dict for JSON body
+
+        Returns:
+            Parsed JSON response from Spotify
+        """
+        # Refresh token if expired
+        if self.is_token_expired():
+            self.refresh_access_token()
+
+        # Construct full URL
+        base_url = "https://api.spotify.com"
+        url = f"{base_url}{endpoint}"
+
+        # Add authorization header
+        headers = {
+            "Authorization": f"Bearer {self.access_token}"
+        }
+
+        # Make request
+        response = requests.request(method, url, headers=headers, params=params, data=data, json=json_data)
+
+        # 5. Error handling
+        if response.status_code >= 400:
+            raise RuntimeError(f"Spotify API request failed [{response.status_code}]: {response.text}")
+
+        # 6. Return parsed JSON
+        return response.json()
 
     def get_current_user_profile(self):
-        pass
+        return self.request('GET', '/v1/me')
 
     def get_user_playlists(self):
-        pass
+        params = {
+            'limit': 10,
+            'offset': 5
+        }
+        return self.request('GET', '/v1/me/playlists', params=params)
 
     def get_playlist_tracks(self):
         pass
