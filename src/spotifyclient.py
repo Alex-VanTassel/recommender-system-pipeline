@@ -1,8 +1,8 @@
-from auth import *
 import time
 from pathlib import Path
 import requests
 from base64 import b64encode
+import json
 
 class SpotifyClient:
     def __init__(self, client_id, client_secret, redirect_uri, tokens_file="tokens.json"):
@@ -98,70 +98,109 @@ class SpotifyClient:
 
         # Persist updated tokens
         self.save_tokens()
-        print("Refresh successful")
 
     def is_token_expired(self, buffer=10):
+        '''
+        Checks to see if access token has expired (or is close to)
+        '''
         return self.expires_at < time.time() + buffer
 
 
     def request(self, method, endpoint, params=None, data=None, json_data=None):
-        """
-        Make a request to the Spotify API, handling token refresh automatically.
-
-        Args:
-            method: 'GET', 'POST', etc.
-            endpoint: Spotify API endpoint, e.g., '/v1/me/top/tracks'
-            params: dict of query parameters
-            data: dict for form-encoded body
-            json_data: dict for JSON body
-
-        Returns:
-            Parsed JSON response from Spotify
-        """
-        # Refresh token if expired
-        if self.is_token_expired():
-            self.refresh_access_token()
-
-        # Construct full URL
         base_url = "https://api.spotify.com"
         url = f"{base_url}{endpoint}"
 
-        # Add authorization header
-        headers = {
-            "Authorization": f"Bearer {self.access_token}"
-        }
+        def _make_request():
+            headers = {
+                "Authorization": f"Bearer {self.access_token}"
+            }
+            return requests.request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                data=data,
+                json=json_data
+            )
 
-        # Make request
-        response = requests.request(method, url, headers=headers, params=params, data=data, json=json_data)
+        # First attempt
+        if self.is_token_expired():
+            self.refresh_access_token()
 
-        # 5. Error handling
+        response = _make_request()
+
+        # If token expired anyway, refresh and retry ONCE
+        if response.status_code == 401:
+            self.refresh_access_token()
+            response = _make_request()
+
         if response.status_code >= 400:
-            raise RuntimeError(f"Spotify API request failed [{response.status_code}]: {response.text}")
+            raise RuntimeError(
+                f"Spotify API request failed [{response.status_code}]: {response.text}"
+            )
 
-        # 6. Return parsed JSON
         return response.json()
 
     def get_current_user_profile(self):
+        '''
+        Gets the current users profile data
+        '''
         return self.request('GET', '/v1/me')
 
     def get_user_playlists(self):
+        '''
+        Get's the current users playlists
+        '''
         params = {
-            'limit': 10,
-            'offset': 5
+            'limit': 50
         }
-        return self.request('GET', '/v1/me/playlists', params=params)
+        return self.paginate('/v1/me/playlists', params=params)
 
-    def get_playlist_tracks(self):
-        pass
+    def get_playlist_tracks(self, playlist_id):
+        '''
+        Gets the tracks belonging to a certain playlist
+
+        Args:
+            playlist_id: (str) the ID associated with the playlist
+
+        Returns:
+            Dict of users playlists
+        '''
+        params = {
+            'limit': 50
+        }
+
+        return self.paginate(f'/v1/playlists/{playlist_id}/tracks', params=params)
 
     def get_user_top_tracks(self):
-        pass
+        '''
+        Returns the users most played songs
+        '''
+        return self.paginate('/v1/me/top/tracks')
 
-    def get_audio_features(self):
-        pass
+    def get_audio_features(self, song_id):
+        '''
+        Returns the audio features of a song (song identified through its)
+        '''
+        return self.request('GET', f'/v1/audio-features/{song_id}')
 
-    def paginate(self):
-        pass
+    def paginate(self, endpoint, params=None):
+        items = []
+        url = endpoint
+        current_params = params
 
-    def validate_token(self):
-        pass
+        while url:
+            response = self.request('GET', url, params=current_params)
+
+            if 'items' not in response:
+                raise RuntimeError("Attempted to paginate a non-paginated endpoint")
+            
+            items.extend(response.get('items', []))
+
+            url = response.get('next')
+            current_params = None
+
+            if url:
+                url = url.replace("https://api.spotify.com", "")
+
+        return items
